@@ -1,90 +1,82 @@
 import numpy as np
 import matplotlib.pyplot as plt
-from scipy.constants import speed_of_light
+import wandb
 
-class SatelliteChannel:
-    def __init__(self, frequency=12e9,  # 载波频率 (Hz)
-                 satellite_height=35786e3,  # 卫星高度 (m) GEO轨道
-                 elevation_angle=30,  # 仰角 (度)
-                 tx_power=10,  # 发射功率 (dBW)
-                 tx_gain=30,  # 发射天线增益 (dBi)
-                 rx_gain=30,  # 接收天线增益 (dBi)
-                 bandwidth=36e6,  # 带宽 (Hz)
-                 temperature=290):  # 系统噪声温度 (K)
-        
-        self.frequency = frequency
-        self.satellite_height = satellite_height
-        self.elevation_angle = np.radians(elevation_angle)
-        self.tx_power = tx_power
-        self.tx_gain = tx_gain
-        self.rx_gain = rx_gain
-        self.bandwidth = bandwidth
-        self.temperature = temperature
-        self.boltzmann = 1.38064852e-23  # 玻尔兹曼常数
-        
-        # 计算波长
-        self.wavelength = speed_of_light / self.frequency
-        
-    def calculate_distance(self):
-        """计算卫星与地面站之间的距离"""
-        R_earth = 6371e3  # 地球半径 (m)
-        # 使用余弦定理计算斜距
-        distance = np.sqrt(R_earth**2 + (R_earth + self.satellite_height)**2 - 
-                   2 * R_earth * (R_earth + self.satellite_height) * 
-                   np.cos(np.pi/2 + self.elevation_angle))
-        return distance
+def satellite_snr_model(distance_km, Pt=10, Gt=1, Gr=1, frequency=12e9, T=290, B=10e6):
+    """
+    计算卫星链路的 SNR（信噪比）
     
-    def free_space_path_loss(self):
-        """计算自由空间路径损耗"""
-        distance = self.calculate_distance()
-        fspl = 20 * np.log10(distance) + 20 * np.log10(self.frequency) + 20 * np.log10(4 * np.pi / speed_of_light)
-        return fspl
+    参数:
+        distance_km : 卫星距离（km）
+        Pt : 发射功率（W），默认 10W
+        Gt, Gr : 发射/接收天线增益（线性值），默认 1（0dBi）
+        frequency : 载波频率（Hz），默认 12GHz（Ku波段）
+        T : 系统噪声温度（K），默认 290K（室温）
+        B : 带宽（Hz），默认 10MHz
     
-    def atmospheric_loss(self):
-        """计算大气衰减 """
-        # 对于Ku波段(12GHz)，典型值为0.5-1.5dB
-        return 1.0  # dB
+    返回:
+        SNR (dB)
+    """
+    c = 3e8  # 光速 (m/s)
+    wavelength = c / frequency  # 波长 (m)
+    d = distance_km * 1e3  # 转换为米
     
-    def rain_attenuation(self, rain_rate):
-        """计算雨衰 """
-        # rain_rate in mm/h
-        if self.frequency < 10e9:
-            return 0.0
-        elif self.frequency < 20e9:
-            return 0.01 * rain_rate  # dB
-        else:
-            return 0.03 * rain_rate  # dB
+    # 自由空间路径损耗 (FSPL)
+    fspl = (4 * np.pi * d / wavelength) ** 2
     
-    def doppler_shift(self, relative_velocity):
-        """计算多普勒频移"""
-        return (relative_velocity / speed_of_light) * self.frequency
+    # 接收功率 (W)
+    Pr = Pt * Gt * Gr * (wavelength ** 2) / fspl
     
-    def received_power(self, rain_rate=0):
-        """计算接收功率"""
-        fspl = self.free_space_path_loss()
-        atm_loss = self.atmospheric_loss()
-        rain_loss = self.rain_attenuation(rain_rate)
-        
-        # EIRP (等效全向辐射功率)
-        eirp = self.tx_power + self.tx_gain
-        
-        # 接收功率 (dBW)
-        pr = eirp - fspl - atm_loss - rain_loss + self.rx_gain
-        return pr
+    # 噪声功率 (W)
+    k = 1.38e-23  # 玻尔兹曼常数
+    N = k * T * B
     
-    def snr(self, rain_rate=0):
-        """计算信噪比(SNR)"""
-        pr = self.received_power(rain_rate)
-        
-        # 噪声功率 (dBW)
-        noise_power = 10 * np.log10(self.boltzmann * self.temperature * self.bandwidth)
-        
-        # SNR (dB)
-        snr_value = pr - noise_power
-        return snr_value
+    # SNR (线性值 -> dB)
+    snr_linear = Pr / N
+    snr_db = 10 * np.log10(snr_linear)
     
-    def capacity(self, rain_rate=0):
-        """计算信道容量 (Shannon公式)"""
-        snr_linear = 10 ** (self.snr(rain_rate) / 10)
-        capacity = self.bandwidth * np.log2(1 + snr_linear)
-        return capacity / 1e6  # 转换为Mbps
+    return snr_db
+
+def plot_snr_vs_distance():
+    """
+    生成 SNR 随距离变化的曲线，并记录到 wandb
+    """
+    # 初始化 wandb 实验
+    wandb.init(
+        project="satellite-channel",
+        name="snr_vs_distance",
+        config={
+            "Pt": 10,
+            "frequency_GHz": 12,
+            "bandwidth_MHz": 10,
+            "noise_temp_K": 290
+        }
+    )
+    
+    # 模拟不同距离下的 SNR（100km ~ 40000km）
+    distances = np.linspace(100, 40000, 100)
+    snr_values = [satellite_snr_model(d) for d in distances]
+    
+    # 绘制 SNR 曲线
+    plt.figure(figsize=(10, 6))
+    plt.plot(distances, snr_values, 'b-', linewidth=2, label="SNR")
+    plt.xlabel("Satellite Distance (km)")
+    plt.ylabel("SNR (dB)")
+    plt.title("Satellite Link SNR vs. Distance")
+    plt.grid(True)
+    plt.legend()
+    
+    # 记录到 wandb
+    wandb.log({
+        "SNR_curve": wandb.Image(plt),
+        "max_SNR": max(snr_values),
+        "min_SNR": min(snr_values)
+    })
+    
+    # 显示图表并关闭 wandb
+    plt.show()
+    wandb.finish()
+
+if __name__ == "__main__":
+    # 示例：运行 SNR 曲线分析
+    plot_snr_vs_distance()
