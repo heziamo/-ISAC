@@ -110,6 +110,40 @@ def save_results_to_csv(results: List[Dict[str, Any]], filename: str):
     
     print(f"结果已保存至: {filename}")
 
+def evaluate_baseline(env, policy_fn, num_episodes=100):
+    """评估基线策略（随机/贪心）"""
+    results = []
+    for episode in range(num_episodes):
+        obs = env.reset()
+        done = False
+        total_reward = 0
+        steps = 0
+        comm_success = 0
+        radar_success = 0
+        env.history = []
+        while not done:
+            action = policy_fn(env)
+            obs, reward, done, info = env.step(action)
+            total_reward += reward
+            steps += 1
+            env.history.append(info)
+            if info['comm']['snr'] >= info['comm']['threshold']:
+                comm_success += 1
+            if info['radar']['snr'] >= info['radar']['threshold']:
+                radar_success += 1
+        comm_success_rate = comm_success / steps
+        radar_success_rate = radar_success / steps
+        results.append({
+            'episode': episode,
+            'total_reward': total_reward,
+            'steps': steps,
+            'avg_comm_snr': np.mean([x['comm']['snr'] for x in env.history]),
+            'avg_radar_snr': np.mean([x['radar']['snr'] for x in env.history]),
+            'comm_success_rate': comm_success_rate,
+            'radar_success_rate': radar_success_rate
+        })
+    return results
+
 def main():
     """主函数：运行两种基线策略并保存结果"""
     # 运行随机策略
