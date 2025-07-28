@@ -71,25 +71,12 @@ def train_ppo(config=None):
     """PPO训练主函数"""
     # 初始化环境
     env = ISAC_SatEnv(config)
-    
-    # 确定观测和动作维度
-    # ...existing code...
-    # 确定观测和动作维度
+    num_targets = env.config.get("num_targets", 2)
     obs_dim = env.observation_space.shape[0]
-    action_dim = env.action_space.shape[0]  # 2
+    action_dim = env.action_space.shape[0] * env.action_space.shape[1]  # 多目标
 
     # 创建策略网络（只用一个连续动作头）
     policy = ActorCritic(obs_dim, [action_dim])
-# ...existing code...
-    # obs_dim = env.observation_space.shape[0]
-    # action_dims = [
-    #     env.action_space.spaces[0].shape[0],  # 功率
-    #     env.action_space.spaces[1].n,         # 子载波
-    #     env.action_space.spaces[2].shape[0]    # 卸载比例
-    # ]
-    
-    # # 创建策略网络
-    # policy = ActorCritic(obs_dim, action_dims)
     optimizer = optim.Adam(policy.parameters(), lr=3e-4)
     ppo = PPO(policy, optimizer)
     
@@ -117,31 +104,39 @@ def train_ppo(config=None):
         obs = env.reset()
         episode_reward = 0
         done = False
-        
-        # 重置缓冲区
         buffer.reset()
-        
+        fairness_comm_list = []
+        fairness_radar_list = []
+
         for step in range(max_steps):
             # 获取动作
             action, log_prob, value = policy.get_action(obs)
-            
+            # 动作reshape
+            action = action.reshape((num_targets, 2))
             # 执行动作
-            next_obs, reward, done, _ = env.step(action)
+            next_obs, reward, done, info = env.step(action)
             
             # 存储经验
-            buffer.add(obs, action, log_prob, value, reward, done)
+            buffer.add(obs, action.flatten(), log_prob, value, reward, done)
             
             # 更新状态
             obs = next_obs
             episode_reward += reward
-            
+            fairness_comm_list.append(info.get('fairness_comm', 0))
+            fairness_radar_list.append(info.get('fairness_radar', 0))
             if done:
                 break
-        
+
         # 记录奖励
         episode_rewards.append(episode_reward)
-        wandb.log({'episode_reward': episode_reward}, step=episode)
+        wandb.log({
+            'episode_reward': episode_reward,
+            'fairness_comm': np.mean(fairness_comm_list),
+            'fairness_radar': np.mean(fairness_radar_list)
+        }, step=episode)
         writer.add_scalar('Reward/Episode', episode_reward, episode)
+        writer.add_scalar('Fairness/Comm', np.mean(fairness_comm_list), episode)
+        writer.add_scalar('Fairness/Radar', np.mean(fairness_radar_list), episode)
         
         # 定期更新策略
         if episode % update_frequency == 0:

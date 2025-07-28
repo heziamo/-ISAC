@@ -39,35 +39,38 @@ class ISAC_SatEnv(gym.Env):
             
             # 目标参数
             "init_distance": 500.0,
-            "target_speed": 7.8  # km/s
+            "target_speed": 7.8,  # km/s
+            
+            # 新增：目标数量（卫星数量）
+            "num_targets": 2
         }
         if config:
             self.config.update(config)
 
-        # 初始化子模块
-        self.comm = SatelliteChannel({
+        self.num_targets = self.config.get("num_targets", 2)
+        # 初始化多个目标
+        self.comm = [SatelliteChannel({
             "comm_freq": self.config["comm_freq"],
             "tx_gain": self.config["tx_gain"],
             "rx_gain": self.config["rx_gain"],
             "noise_temp": self.config["comm_noise_temp"]
-        })
-        
-        self.radar = RadarEcho({
+        }) for _ in range(self.num_targets)]
+        self.radar = [RadarEcho({
             "radar_freq": self.config["radar_freq"],
             "radar_gain": self.config["radar_gain"],
             "target_rcs": self.config["target_rcs"],
             "noise_temp": self.config["radar_noise_temp"]
-        })
+        }) for _ in range(self.num_targets)]
 
-        # 动作空间：[comm_power_ratio, comm_bw_ratio]
+        # 动作空间扩展：每个目标分配功率和带宽
         self.action_space = spaces.Box(
-            low=0.1, high=0.9, shape=(2,), dtype=np.float32
+            low=0.1, high=0.9, shape=(self.num_targets, 2), dtype=np.float32
         )
 
-        # 观测空间设计
+        # 观测空间扩展
         self.observation_space = spaces.Box(
-            low=np.array([-30, -30, 0, 0.1, 0.1]),
-            high=np.array([50, 50, 1, 0.9, 0.9]),
+            low=np.array([-30] * self.num_targets + [-30] * self.num_targets + [0] + [0.1] * self.num_targets * 2),
+            high=np.array([50] * self.num_targets + [50] * self.num_targets + [1] + [0.9] * self.num_targets * 2),
             dtype=np.float32
         )
 
@@ -77,8 +80,8 @@ class ISAC_SatEnv(gym.Env):
     def reset(self) -> np.ndarray:
         """重置环境状态"""
         self.current_step = 0
-        self.target_distance = self.config["init_distance"]
-        self.last_action = np.array([0.5, 0.5])
+        self.target_distance = [self.config["init_distance"]] * self.num_targets
+        self.last_action = np.array([[0.5, 0.5]] * self.num_targets)
         self.history = deque(maxlen=1000)
         return self._get_obs()
 
@@ -87,114 +90,152 @@ class ISAC_SatEnv(gym.Env):
         # 1. 动作处理
         action = np.clip(action, 0.1, 0.9)
         self.last_action = action.copy()
-        
-        # 2. 资源分配
-        comm_power = self.config["total_power"] * action[0]
-        radar_power = self.config["total_power"] * (1 - action[0])
-        comm_bw = self.config["total_bandwidth"] * action[1]
-        radar_bw = self.config["total_bandwidth"] * (1 - action[1])
+        comm_powers = []
+        radar_powers = []
+        comm_bws = []
+        radar_bws = []
+        comm_snrs = []
+        radar_snrs = []
+        info_targets = []
 
-        # 3. 更新目标距离
-        self.target_distance += self.config["target_speed"] * 1.0  # 假设1秒步长
-        self.target_distance = max(100, self.target_distance)  # 最小距离限制
+        total_power = self.config["total_power"]
+        total_bw = self.config["total_bandwidth"]
 
-        # 4. 更新子系统
-        comm_snr = self.comm.update(self.target_distance, comm_power, comm_bw)
-        radar_snr = self.radar.update(self.target_distance, radar_power, radar_bw)
-        
-        # 5. 计算奖励
-        reward = self._calc_reward(comm_snr, radar_snr)
-        
-        # 6. 记录信息
+        # 均分资源（或可自定义分配策略）
+        for i in range(self.num_targets):
+            comm_power = total_power * action[i, 0] / self.num_targets
+            radar_power = total_power * (1 - action[i, 0]) / self.num_targets
+            comm_bw = total_bw * action[i, 1] / self.num_targets
+            radar_bw = total_bw * (1 - action[i, 1]) / self.num_targets
+
+            self.target_distance[i] += self.config["target_speed"] * 1.0
+            self.target_distance[i] = max(100, self.target_distance[i])
+
+            comm_snr = self.comm[i].update(self.target_distance[i], comm_power, comm_bw)
+            radar_snr = self.radar[i].update(self.target_distance[i], radar_power, radar_bw)
+
+            comm_powers.append(comm_power)
+            radar_powers.append(radar_power)
+            comm_bws.append(comm_bw)
+            radar_bws.append(radar_bw)
+            comm_snrs.append(comm_snr)
+            radar_snrs.append(radar_snr)
+
+            info_targets.append({
+                "comm": {
+                    "snr": comm_snr,
+                    "power": comm_power,
+                    "bandwidth": comm_bw,
+                    "threshold": self.config["comm_snr_thresh"]
+                },
+                "radar": {
+                    "snr": radar_snr,
+                    "power": radar_power,
+                    "bandwidth": radar_bw,
+                    "threshold": self.config["radar_snr_thresh"]
+                },
+                "distance": self.target_distance[i]
+            })
+
+        # 公平性指标（Jain's index）
+        fairness_comm = self._jain_index(comm_snrs)
+        fairness_radar = self._jain_index(radar_snrs)
+
+        # 奖励：所有目标平均 + 公平性奖励
+        reward = self._calc_reward(comm_snrs, radar_snrs) + 0.2 * (fairness_comm + fairness_radar)
+
         info = {
-            "comm": {
-                "snr": comm_snr,
-                "power": comm_power,
-                "bandwidth": comm_bw,
-                "threshold": self.config["comm_snr_thresh"]
-            },
-            "radar": {
-                "snr": radar_snr,
-                "power": radar_power,
-                "bandwidth": radar_bw,
-                "threshold": self.config["radar_snr_thresh"]
-            },
-            "distance": self.target_distance
+            "targets": info_targets,
+            "fairness_comm": fairness_comm,
+            "fairness_radar": fairness_radar
         }
         self.history.append(info)
-        
-        # 7. 更新状态
         self.current_step += 1
         done = self.current_step >= self.config["max_steps"]
-        
         return self._get_obs(), reward, done, info
 
     def _get_obs(self) -> np.ndarray:
-        """构建观测向量"""
-        return np.array([
-            self.comm.current_snr,
-            self.radar.current_snr,
-            float(self.current_step) / self.config["max_steps"],
-            self.last_action[0],
-            self.last_action[1]
-        ], dtype=np.float32)
+        obs = []
+        obs += [c.current_snr for c in self.comm]
+        obs += [r.current_snr for r in self.radar]
+        obs.append(float(self.current_step) / self.config["max_steps"])
+        obs += self.last_action.flatten().tolist()
+        return np.array(obs, dtype=np.float32)
 
-    def _calc_reward(self, comm_snr: float, radar_snr: float) -> float:
-        """综合奖励函数"""
-        # 性能奖励
-        comm_reward = np.clip((comm_snr - 5) / 25, 0, 1)  # 5-30dB -> 0-1
-        radar_reward = np.clip((radar_snr + 20) / 40, 0, 1)  # -20-20dB -> 0-1
-        
-        # 阈值惩罚
-        comm_penalty = -5 if comm_snr < self.config["comm_snr_thresh"] else 0
-        radar_penalty = -3 if radar_snr < self.config["radar_snr_thresh"] else 0
-        
-        # 动作平滑奖励
-        action_penalty = -0.1 * np.abs(self.last_action[0] - 0.5)  # 鼓励均衡分配
-        
-        return 0.5*comm_reward + 0.5*radar_reward + comm_penalty + radar_penalty + action_penalty
+    def _calc_reward(self, comm_snrs, radar_snrs) -> float:
+        comm_rewards = [np.clip((snr - 5) / 25, 0, 1) for snr in comm_snrs]
+        radar_rewards = [np.clip((snr + 20) / 40, 0, 1) for snr in radar_snrs]
+        comm_penalty = sum([-5 if snr < self.config["comm_snr_thresh"] else 0 for snr in comm_snrs])
+        radar_penalty = sum([-3 if snr < self.config["radar_snr_thresh"] else 0 for snr in radar_snrs])
+        action_penalty = -0.1 * np.sum(np.abs(self.last_action - 0.5))
+        return 0.5 * np.mean(comm_rewards) + 0.5 * np.mean(radar_rewards) + comm_penalty + radar_penalty + action_penalty
+
+    def _jain_index(self, values):
+        values = np.array(values)
+        if np.sum(values) == 0:
+            return 0.0
+        return (np.sum(values) ** 2) / (len(values) * np.sum(values ** 2) + 1e-8)
 
     def render(self, mode='human'):
         """可视化"""
         if not self.history:
             return None
-            
+
+        # 处理多目标数据
+        num_targets = len(self.history[0]["targets"])
+        comm_snrs = [[] for _ in range(num_targets)]
+        radar_snrs = [[] for _ in range(num_targets)]
+        comm_powers = [[] for _ in range(num_targets)]
+        radar_powers = [[] for _ in range(num_targets)]
+        comm_bws = [[] for _ in range(num_targets)]
+        radar_bws = [[] for _ in range(num_targets)]
+        distances = [[] for _ in range(num_targets)]
+
+        for entry in self.history:
+            for i, tgt in enumerate(entry["targets"]):
+                comm_snrs[i].append(tgt["comm"]["snr"])
+                radar_snrs[i].append(tgt["radar"]["snr"])
+                comm_powers[i].append(tgt["comm"]["power"])
+                radar_powers[i].append(tgt["radar"]["power"])
+                comm_bws[i].append(tgt["comm"]["bandwidth"]/1e6)
+                radar_bws[i].append(tgt["radar"]["bandwidth"]/1e6)
+                distances[i].append(tgt["distance"])
+
         plt.figure(figsize=(15, 8))
-        
+
         # SNR曲线
         plt.subplot(2, 2, 1)
-        plt.plot([x["comm"]["snr"] for x in self.history], 'b-', label='Comm')
-        plt.plot([x["radar"]["snr"] for x in self.history], 'r-', label='Radar')
+        for i in range(num_targets):
+            plt.plot(comm_snrs[i], label=f'Comm-{i+1}')
+            plt.plot(radar_snrs[i], label=f'Radar-{i+1}')
         plt.axhline(self.config["comm_snr_thresh"], color='b', linestyle='--')
         plt.axhline(self.config["radar_snr_thresh"], color='r', linestyle='--')
         plt.title("SNR Performance")
         plt.legend()
-        
+
         # 资源分配
         plt.subplot(2, 2, 2)
-        plt.stackplot(
-            range(len(self.history)),
-            [x["comm"]["power"] for x in self.history],
-            [x["radar"]["power"] for x in self.history],
-            labels=['Comm', 'Radar']
-        )
+        for i in range(num_targets):
+            plt.plot(comm_powers[i], label=f'Comm-{i+1}')
+            plt.plot(radar_powers[i], label=f'Radar-{i+1}')
         plt.title("Power Allocation")
-        
+        plt.legend()
+
         # 带宽分配
         plt.subplot(2, 2, 3)
-        plt.stackplot(
-            range(len(self.history)),
-            [x["comm"]["bandwidth"]/1e6 for x in self.history],
-            [x["radar"]["bandwidth"]/1e6 for x in self.history],
-            labels=['Comm', 'Radar']
-        )
+        for i in range(num_targets):
+            plt.plot(comm_bws[i], label=f'Comm-{i+1}')
+            plt.plot(radar_bws[i], label=f'Radar-{i+1}')
         plt.title("Bandwidth Allocation (MHz)")
-        
+        plt.legend()
+
         # 目标距离
         plt.subplot(2, 2, 4)
-        plt.plot([x["distance"] for x in self.history], 'k-')
+        for i in range(num_targets):
+            plt.plot(distances[i], label=f'Target-{i+1}')
         plt.title("Target Distance (km)")
-        
+        plt.legend()
+
         plt.tight_layout()
         if mode == 'human':
             plt.show()

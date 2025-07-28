@@ -18,8 +18,8 @@ def greedy_policy(env) -> np.ndarray:
     - 通信功率分配：优先满足通信需求（50%功率）
     - 带宽分配：优先满足雷达需求（50%带宽）
     """
-    # 使用固定比例的策略
-    return np.array([0.5, 0.5], dtype=np.float32)
+    # 多目标均分
+    return np.array([[0.5, 0.5]] * env.config.get("num_targets", 2), dtype=np.float32)
 
 def run_episode(env, policy_fn) -> Dict[str, Any]:
     """运行单个episode并收集性能指标"""
@@ -31,6 +31,9 @@ def run_episode(env, policy_fn) -> Dict[str, Any]:
     radar_snr_list = []
     comm_success_count = 0
     radar_success_count = 0
+    fairness_comm_list = []
+    fairness_radar_list = []
+    num_targets = env.config.get("num_targets", 2)
     
     while not done:
         # 选择动作
@@ -42,20 +45,18 @@ def run_episode(env, policy_fn) -> Dict[str, Any]:
         # 更新统计信息
         total_reward += reward
         steps += 1
-        comm_snr_list.append(info['comm']['snr'])
-        radar_snr_list.append(info['radar']['snr'])
-        
-        # 检查是否达到阈值
-        if info['comm']['snr'] >= info['comm']['threshold']:
-            comm_success_count += 1
-        if info['radar']['snr'] >= info['radar']['threshold']:
-            radar_success_count += 1
+        fairness_comm_list.append(info.get('fairness_comm', 0))
+        fairness_radar_list.append(info.get('fairness_radar', 0))
+        comm_snr_list += [t['comm']['snr'] for t in info['targets']]
+        radar_snr_list += [t['radar']['snr'] for t in info['targets']]
+        comm_success_count += sum([t['comm']['snr'] >= t['comm']['threshold'] for t in info['targets']])
+        radar_success_count += sum([t['radar']['snr'] >= t['radar']['threshold'] for t in info['targets']])
     
     # 计算平均性能指标
     avg_comm_snr = np.mean(comm_snr_list) if comm_snr_list else 0
     avg_radar_snr = np.mean(radar_snr_list) if radar_snr_list else 0
-    comm_success_rate = comm_success_count / steps if steps > 0 else 0
-    radar_success_rate = radar_success_count / steps if steps > 0 else 0
+    comm_success_rate = comm_success_count / (steps * num_targets) if steps > 0 else 0
+    radar_success_rate = radar_success_count / (steps * num_targets) if steps > 0 else 0
     
     return {
         'total_reward': total_reward,
@@ -63,7 +64,9 @@ def run_episode(env, policy_fn) -> Dict[str, Any]:
         'avg_comm_snr': avg_comm_snr,
         'avg_radar_snr': avg_radar_snr,
         'comm_success_rate': comm_success_rate,
-        'radar_success_rate': radar_success_rate
+        'radar_success_rate': radar_success_rate,
+        'fairness_comm': np.mean(fairness_comm_list),
+        'fairness_radar': np.mean(fairness_radar_list)
     }
 
 def run_baseline(policy_name: str, num_episodes: int) -> List[Dict[str, Any]]:
@@ -101,7 +104,8 @@ def save_results_to_csv(results: List[Dict[str, Any]], filename: str):
     with open(filename, 'w', newline='') as csvfile:
         fieldnames = ['episode', 'total_reward', 'steps', 
                       'avg_comm_snr', 'avg_radar_snr',
-                      'comm_success_rate', 'radar_success_rate']
+                      'comm_success_rate', 'radar_success_rate',
+                      'fairness_comm', 'fairness_radar']
         writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
         
         writer.writeheader()

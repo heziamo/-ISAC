@@ -55,7 +55,9 @@ class BaselineVisualizer:
                     'avg_comm_snr': float(row['avg_comm_snr']),
                     'avg_radar_snr': float(row['avg_radar_snr']),
                     'comm_success_rate': float(row['comm_success_rate']),
-                    'radar_success_rate': float(row['radar_success_rate'])
+                    'radar_success_rate': float(row['radar_success_rate']),
+                    'fairness_comm': float(row.get('fairness_comm', 0)),
+                    'fairness_radar': float(row.get('fairness_radar', 0))
                 }
                 data.append(converted)
         return data
@@ -74,25 +76,33 @@ class BaselineVisualizer:
             'comm_success': np.mean([d['comm_success_rate'] for d in data]),
             'radar_success': np.mean([d['radar_success_rate'] for d in data])
         }
+        metrics.update({
+            'fairness_comm': np.mean([d.get('fairness_comm', 0) for d in data]),
+            'fairness_radar': np.mean([d.get('fairness_radar', 0) for d in data])
+        })
         return metrics
 
     def plot_comparison(self, greedy_metrics: dict, random_metrics: dict):
         """生成对比柱状图"""
         # 准备数据
-        labels = ['总奖励', '通信SNR', '雷达SNR', '通信成功率', '雷达成功率']
+        labels = ['总奖励', '通信SNR', '雷达SNR', '通信成功率', '雷达成功率', '通信公平性', '雷达公平性']
         greedy_values = [
             greedy_metrics['avg_reward'],
             greedy_metrics['avg_comm_snr'],
             greedy_metrics['avg_radar_snr'],
             greedy_metrics['comm_success'],
-            greedy_metrics['radar_success']
+            greedy_metrics['radar_success'],
+            greedy_metrics.get('fairness_comm', 0),
+            greedy_metrics.get('fairness_radar', 0)
         ]
         random_values = [
             random_metrics['avg_reward'],
             random_metrics['avg_comm_snr'],
             random_metrics['avg_radar_snr'],
             random_metrics['comm_success'],
-            random_metrics['radar_success']
+            random_metrics['radar_success'],
+            random_metrics.get('fairness_comm', 0),
+            random_metrics.get('fairness_radar', 0)
         ]
         
         # 创建图表

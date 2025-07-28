@@ -19,6 +19,7 @@ def load_policy(model_path, obs_dim, action_dims):
 def evaluate_ppo(env, policy, num_episodes=100):
     """评估PPO策略"""
     results = []
+    num_targets = env.config.get("num_targets", 2)
     
     for episode in range(num_episodes):
         obs = env.reset()
@@ -27,36 +28,41 @@ def evaluate_ppo(env, policy, num_episodes=100):
         steps = 0
         comm_success = 0
         radar_success = 0
+        fairness_comm_list = []
+        fairness_radar_list = []
         
         while not done:
             # 获取动作
             action, _, _ = policy.get_action(obs)
+            action = action.reshape((num_targets, 2))
             
             # 执行动作
             obs, reward, done, info = env.step(action)
             
             total_reward += reward
             steps += 1
+            fairness_comm_list.append(info.get('fairness_comm', 0))
+            fairness_radar_list.append(info.get('fairness_radar', 0))
             
-            # 检查是否达到阈值
-            if info['comm']['snr'] >= info['comm']['threshold']:
-                comm_success += 1
-            if info['radar']['snr'] >= info['radar']['threshold']:
-                radar_success += 1
+            # 多目标成功率统计
+            comm_success += sum([t['comm']['snr'] >= t['comm']['threshold'] for t in info['targets']])
+            radar_success += sum([t['radar']['snr'] >= t['radar']['threshold'] for t in info['targets']])
         
         # 计算成功率
-        comm_success_rate = comm_success / steps
-        radar_success_rate = radar_success / steps
+        comm_success_rate = comm_success / (steps * num_targets)
+        radar_success_rate = radar_success / (steps * num_targets)
         
         # 保存结果
         results.append({
             'episode': episode,
             'total_reward': total_reward,
             'steps': steps,
-            'avg_comm_snr': np.mean([x['comm']['snr'] for x in env.history]),
-            'avg_radar_snr': np.mean([x['radar']['snr'] for x in env.history]),
+            'avg_comm_snr': np.mean([np.mean([t['comm']['snr'] for t in h['targets']]) for h in env.history]),
+            'avg_radar_snr': np.mean([np.mean([t['radar']['snr'] for t in h['targets']]) for h in env.history]),
             'comm_success_rate': comm_success_rate,
-            'radar_success_rate': radar_success_rate
+            'radar_success_rate': radar_success_rate,
+            'fairness_comm': np.mean(fairness_comm_list),
+            'fairness_radar': np.mean(fairness_radar_list)
         })
         
         if (episode + 1) % 10 == 0:
