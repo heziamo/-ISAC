@@ -73,7 +73,7 @@ def train_ppo(config=None):
     env = ISAC_SatEnv(config)
     num_targets = env.config.get("num_targets", 2)
     obs_dim = env.observation_space.shape[0]
-    action_dim = env.action_space.shape[0] * env.action_space.shape[1]  # 多目标
+    action_dim = np.prod(env.action_space.shape)  # 修正动作维度计算
 
     # 创建策略网络（只用一个连续动作头）
     policy = ActorCritic(obs_dim, [action_dim])
@@ -192,7 +192,3 @@ if __name__ == "__main__":
             config = json.load(f)
     
     train_ppo(config)
-
-self.action_space = spaces.Box(
-    low=0.1, high=0.9, shape=(2,), dtype=np.float32
-)
