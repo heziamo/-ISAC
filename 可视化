@@ -1,0 +1,263 @@
+import matplotlib.pyplot as plt
+import numpy as np
+import plotly.graph_objects as go
+import plotly.express as px
+from plotly.subplots import make_subplots
+import pandas as pd
+from datetime import datetime, timedelta
+import streamlit as st
+
+# 设置中文字体
+plt.rcParams['font.sans-serif'] = ['SimHei', 'Microsoft YaHei']
+plt.rcParams['axes.unicode_minus'] = False
+
+def create_sample_data():
+    """创建示例数据"""
+    np.random.seed(42)
+    
+    # 时间序列数据
+    dates = pd.date_range('2024-01-01', periods=100, freq='D')
+    sales_data = np.cumsum(np.random.randn(100) * 10 + 100)
+    
+    # 分类数据
+    categories = ['电子产品', '服装', '食品', '图书', '家居']
+    sales_by_category = np.random.randint(100, 1000, len(categories))
+    
+    # 散点图数据
+    x_scatter = np.random.randn(50) * 10
+    y_scatter = x_scatter * 2 + np.random.randn(50) * 5
+    
+    # 3D数据
+    x_3d = np.random.randn(30)
+    y_3d = np.random.randn(30)
+    z_3d = x_3d**2 + y_3d**2
+    
+    return {
+        'dates': dates,
+        'sales_data': sales_data,
+        'categories': categories,
+        'sales_by_category': sales_by_category,
+        'x_scatter': x_scatter,
+        'y_scatter': y_scatter,
+        'x_3d': x_3d,
+        'y_3d': y_3d,
+        'z_3d': z_3d
+    }
+
+def create_matplotlib_charts(data):
+    """使用matplotlib创建图表"""
+    fig, axes = plt.subplots(2, 2, figsize=(15, 12))
+    fig.suptitle('数据可视化展示 - Matplotlib', fontsize=16, fontweight='bold')
+    
+    # 1. 折线图 - 销售趋势
+    axes[0, 0].plot(data['dates'], data['sales_data'], 'b-', linewidth=2, alpha=0.8)
+    axes[0, 0].set_title('销售趋势分析', fontsize=12, fontweight='bold')
+    axes[0, 0].set_xlabel('日期')
+    axes[0, 0].set_ylabel('销售额')
+    axes[0, 0].grid(True, alpha=0.3)
+    axes[0, 0].tick_params(axis='x', rotation=45)
+    
+    # 2. 柱状图 - 分类销售
+    bars = axes[0, 1].bar(data['categories'], data['sales_by_category'], 
+                           color=['#FF6B6B', '#4ECDC4', '#45B7D1', '#96CEB4', '#FFEAA7'])
+    axes[0, 1].set_title('各分类销售额', fontsize=12, fontweight='bold')
+    axes[0, 1].set_xlabel('产品分类')
+    axes[0, 1].set_ylabel('销售额')
+    axes[0, 1].tick_params(axis='x', rotation=45)
+    
+    # 添加数值标签
+    for bar in bars:
+        height = bar.get_height()
+        axes[0, 1].text(bar.get_x() + bar.get_width()/2., height + 10,
+                        f'{int(height)}', ha='center', va='bottom')
+    
+    # 3. 散点图
+    scatter = axes[1, 0].scatter(data['x_scatter'], data['y_scatter'], 
+                                 c=data['x_scatter'], cmap='viridis', alpha=0.7, s=50)
+    axes[1, 0].set_title('数据分布散点图', fontsize=12, fontweight='bold')
+    axes[1, 0].set_xlabel('X轴')
+    axes[1, 0].set_ylabel('Y轴')
+    axes[1, 0].grid(True, alpha=0.3)
+    plt.colorbar(scatter, ax=axes[1, 0])
+    
+    # 4. 饼图
+    wedges, texts, autotexts = axes[1, 1].pie(data['sales_by_category'], 
+                                               labels=data['categories'], 
+                                               autopct='%1.1f%%',
+                                               colors=['#FF6B6B', '#4ECDC4', '#45B7D1', '#96CEB4', '#FFEAA7'])
+    axes[1, 1].set_title('销售占比分析', fontsize=12, fontweight='bold')
+    
+    plt.tight_layout()
+    return fig
+
+def create_plotly_charts(data):
+    """使用Plotly创建交互式图表"""
+    
+    # 创建子图布局
+    fig = make_subplots(
+        rows=2, cols=2,
+        subplot_titles=('销售趋势分析', '各分类销售额', '数据分布散点图', '销售占比分析'),
+        specs=[[{"type": "scatter"}, {"type": "bar"}],
+               [{"type": "scatter"}, {"type": "pie"}]]
+    )
+    
+    # 1. 折线图
+    fig.add_trace(
+        go.Scatter(x=data['dates'], y=data['sales_data'], 
+                  mode='lines+markers', name='销售额',
+                  line=dict(color='#1f77b4', width=3),
+                  marker=dict(size=6)),
+        row=1, col=1
+    )
+    
+    # 2. 柱状图
+    fig.add_trace(
+        go.Bar(x=data['categories'], y=data['sales_by_category'],
+               marker_color=['#FF6B6B', '#4ECDC4', '#45B7D1', '#96CEB4', '#FFEAA7'],
+               text=data['sales_by_category'], textposition='auto'),
+        row=1, col=2
+    )
+    
+    # 3. 散点图
+    fig.add_trace(
+        go.Scatter(x=data['x_scatter'], y=data['y_scatter'],
+                  mode='markers', name='数据点',
+                  marker=dict(size=8, color=data['x_scatter'], 
+                            colorscale='viridis', showscale=True)),
+        row=2, col=1
+    )
+    
+    # 4. 饼图
+    fig.add_trace(
+        go.Pie(labels=data['categories'], values=data['sales_by_category'],
+               marker_colors=['#FF6B6B', '#4ECDC4', '#45B7D1', '#96CEB4', '#FFEAA7']),
+        row=2, col=2
+    )
+    
+    # 更新布局
+    fig.update_layout(
+        title_text="交互式数据可视化 - Plotly",
+        title_x=0.5,
+        height=800,
+        showlegend=False
+    )
+    
+    # 更新坐标轴
+    fig.update_xaxes(title_text="日期", row=1, col=1)
+    fig.update_yaxes(title_text="销售额", row=1, col=1)
+    fig.update_xaxes(title_text="产品分类", row=1, col=2)
+    fig.update_yaxes(title_text="销售额", row=1, col=2)
+    fig.update_xaxes(title_text="X轴", row=2, col=1)
+    fig.update_yaxes(title_text="Y轴", row=2, col=1)
+    
+    return fig
+
+def create_3d_visualization(data):
+    """创建3D可视化"""
+    fig = go.Figure(data=[go.Scatter3d(
+        x=data['x_3d'],
+        y=data['y_3d'],
+        z=data['z_3d'],
+        mode='markers',
+        marker=dict(
+            size=8,
+            color=data['z_3d'],
+            colorscale='Viridis',
+            opacity=0.8
+        )
+    )])
+    
+    fig.update_layout(
+        title='3D数据可视化',
+        scene=dict(
+            xaxis_title='X轴',
+            yaxis_title='Y轴',
+            zaxis_title='Z轴'
+        ),
+        width=800,
+        height=600
+    )
+    
+    return fig
+
+def main():
+    """主函数"""
+    st.set_page_config(page_title="数据可视化应用", layout="wide")
+    
+    st.title("📊 数据可视化应用")
+    st.markdown("---")
+    
+    # 创建示例数据
+    data = create_sample_data()
+    
+    # 侧边栏选择
+    st.sidebar.header("📈 图表类型选择")
+    chart_type = st.sidebar.selectbox(
+        "选择可视化类型",
+        ["Matplotlib 静态图表", "Plotly 交互式图表", "3D 可视化"]
+    )
+    
+    if chart_type == "Matplotlib 静态图表":
+        st.header("📊 Matplotlib 静态图表")
+        st.write("以下是使用Matplotlib创建的静态图表：")
+        
+        fig = create_matplotlib_charts(data)
+        st.pyplot(fig)
+        
+        st.markdown("### 图表说明")
+        st.markdown("""
+        - **销售趋势分析**: 展示时间序列数据的变化趋势
+        - **各分类销售额**: 比较不同产品类别的销售表现
+        - **数据分布散点图**: 显示两个变量之间的关系
+        - **销售占比分析**: 展示各分类在总销售额中的占比
+        """)
+        
+    elif chart_type == "Plotly 交互式图表":
+        st.header("🎯 Plotly 交互式图表")
+        st.write("以下是使用Plotly创建的交互式图表，您可以缩放、平移和悬停查看详细信息：")
+        
+        fig = create_plotly_charts(data)
+        st.plotly_chart(fig, use_container_width=True)
+        
+        st.markdown("### 交互功能")
+        st.markdown("""
+        - **缩放**: 使用鼠标滚轮或工具栏进行缩放
+        - **平移**: 点击并拖拽来移动视图
+        - **悬停**: 将鼠标悬停在数据点上查看详细信息
+        - **选择**: 使用工具栏中的选择工具
+        - **重置**: 双击图表重置视图
+        """)
+        
+    elif chart_type == "3D 可视化":
+        st.header("🌐 3D 数据可视化")
+        st.write("以下是3D散点图，展示三维数据的分布：")
+        
+        fig_3d = create_3d_visualization(data)
+        st.plotly_chart(fig_3d, use_container_width=True)
+        
+        st.markdown("### 3D 交互功能")
+        st.markdown("""
+        - **旋转**: 点击并拖拽来旋转3D视图
+        - **缩放**: 使用鼠标滚轮进行缩放
+        - **平移**: 右键点击并拖拽来平移视图
+        - **悬停**: 将鼠标悬停在数据点上查看坐标
+        """)
+    
+    # 数据统计信息
+    st.sidebar.markdown("---")
+    st.sidebar.header("📋 数据统计")
+    st.sidebar.metric("总销售额", f"¥{int(sum(data['sales_by_category'])):,}")
+    st.sidebar.metric("平均销售额", f"¥{int(np.mean(data['sales_by_category'])):,}")
+    st.sidebar.metric("最高销售额", f"¥{int(max(data['sales_by_category'])):,}")
+    
+    # 底部信息
+    st.markdown("---")
+    st.markdown("""
+    <div style='text-align: center; color: #666;'>
+        <p>🎨 这是一个完整的数据可视化应用，展示了不同类型的数据可视化技术</p>
+        <p>📚 使用了 Matplotlib、Plotly 和 Streamlit 等库</p>
+    </div>
+    """, unsafe_allow_html=True)
+
+if __name__ == "__main__":
+    main() 
