@@ -143,7 +143,7 @@ def train_ppo(config=None):
             # 计算最终状态的价值
             with torch.no_grad():
                 obs_tensor = torch.as_tensor(obs, dtype=torch.float32).unsqueeze(0)
-                _, _, _, last_value = policy(obs_tensor)
+                _, last_value = policy(obs_tensor)
                 last_value = last_value.item()
             
             # 计算回报和优势
