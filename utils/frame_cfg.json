@@ -1,0 +1,56 @@
+{
+    "system_parameters": {
+      "frequency_GHz": 12.0,
+      "bandwidth_MHz": 100.0,
+      "duplex_mode": "TDD",
+      "subcarrier_spacing_kHz": 60,
+      "symbol_duration_us": 16.67,
+      "frame_length_ms": 10.0
+    },
+    "communication": {
+      "tx_power_W": 10.0,
+      "antenna_gain_dBi": 30.0,
+      "modulation": {
+        "type": "OFDM",
+        "mcs_table": [
+          {"index": 0, "mod": "QPSK", "code_rate": 0.2, "required_snr_dB": 3},
+          {"index": 1, "mod": "16QAM", "code_rate": 0.5, "required_snr_dB": 10}
+        ]
+      },
+      "snr_model": {
+        "noise_temp_K": 290,
+        "path_loss_exponent": 2.0,
+        "rain_attenuation_db": 2.0
+      }
+    },
+    "radar": {
+      "pulse_width_us": 10.0,
+      "pri_us": 100.0,
+      "rcs_m2": 1.0,
+      "antenna_gain_dBi": 30.0,
+      "min_detectable_snr_dB": 15.0,
+      "waveform": {
+        "type": "OFDM-LFM",
+        "chirp_bandwidth_MHz": 50.0,
+        "subcarriers_radar_ratio": 0.5
+      }
+    },
+    "joint_resource_allocation": {
+      "time_sharing": [
+        {"slot": 0, "function": "radar", "symbols": [0, 1, 2]},
+        {"slot": 1, "function": "comm", "symbols": [3, 4, 5, 6]},
+        {"slot": 2, "function": "guard", "symbols": [7]}
+      ],
+      "frequency_sharing": {
+        "comm_subcarriers": [0, 511],
+        "radar_subcarriers": [512, 1023],
+        "guard_band_subcarriers": [510, 513]
+      }
+    },
+    "constraints": {
+      "max_papr_dB": 8.0,
+      "max_tx_power_dBm": 40.0,
+      "latency_ms": 5.0,
+      "interference_threshold_dB": -15
+    }
+  }

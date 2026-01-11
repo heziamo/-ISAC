@@ -1,0 +1,14 @@
+{
+  "best_trial": {
+    "number": 17,
+    "value": 123.45,
+    "params": {
+      "lr": 0.00021,
+      "gamma": 0.98,
+      "clip_epsilon": 0.18,
+      "entropy_coeff": 0.015,
+      "hidden_size": 256
+    }
+  },
+  "n_trials": 50
+}
